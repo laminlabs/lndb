@@ -96,17 +96,18 @@ def setup_django(
 
     import dj_database_url
     import django
+    from django.db import connections
     from django.conf import settings
     from django.core.management import call_command
 
     # configuration
+    default_db = dj_database_url.config(
+        default=isettings.db,
+        # see comment next to patching BaseDatabaseWrapper below
+        conn_max_age=CONN_MAX_AGE,
+        conn_health_checks=True,
+    )
     if not settings.configured:
-        default_db = dj_database_url.config(
-            default=isettings.db,
-            # see comment next to patching BaseDatabaseWrapper below
-            conn_max_age=CONN_MAX_AGE,
-            conn_health_checks=True,
-        )
         DATABASES = {
             "default": default_db,
         }
@@ -144,10 +145,15 @@ def setup_django(
             )
         settings.configure(**kwargs)
         django.setup(set_prefix=False)
-        # https://laminlabs.slack.com/archives/C04FPE8V01W/p1698239551460289
-        from django.db.backends.base.base import BaseDatabaseWrapper
 
-        BaseDatabaseWrapper.close_if_health_check_failed = close_if_health_check_failed
+    # compare this with add_db_connection in lamindb._registry
+    # is used to update the default connection string
+    connections.settings["default"] = default_db
+
+    # https://laminlabs.slack.com/archives/C04FPE8V01W/p1698239551460289
+    from django.db.backends.base.base import BaseDatabaseWrapper
+
+    BaseDatabaseWrapper.close_if_health_check_failed = close_if_health_check_failed
 
     if configure_only:
         return None
@@ -175,7 +181,6 @@ def setup_django(
         isettings._update_cloud_sqlite_file(unlock_cloud_sqlite=False)
     else:
         if init:
-            # create migrations
             call_command("migrate", verbosity=0)
         else:
             status, latest_migrs = get_migrations_to_sync()
@@ -200,6 +205,7 @@ def setup_django(
     current_instance_settings_file().unlink()
     if current_settings_file_existed:
         shutil.copy(current_settings_file.with_name("_tmp.env"), current_settings_file)
+        current_settings_file.with_name("_tmp.env").unlink()
 
     global IS_SETUP
     IS_SETUP = True

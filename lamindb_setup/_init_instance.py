@@ -101,11 +101,10 @@ def reload_lamindb(isettings: InstanceSettings):
         import lamindb
 
         importlib.reload(lamindb)
-        logger.important(f"lamindb instance: {isettings.identifier}")
-    else:
-        # only log if we're outside lamindb
-        # lamindb itself logs upon import!
-        logger.important(f"loaded instance: {isettings.owner}/{isettings.name}")
+    verbosity = logger._verbosity
+    logger.set_verbosity(2)
+    logger.success(f"loaded instance: {isettings.identifier}")
+    logger.set_verbosity(verbosity)
 
 
 ERROR_SQLITE_CACHE = """
@@ -137,15 +136,6 @@ def init(
         db: {}
         schema: {}
     """
-    from ._check_instance_setup import check_instance_setup
-
-    if check_instance_setup() and not _test:
-        raise RuntimeError(
-            "Currently don't support init or load of multiple instances in the same"
-            " Python session. We will bring this feature back at some point."
-        )
-    else:
-        close_instance(mute=True)
     # clean up in next refactor
     # avoid circular import
     from ._load_instance import load
@@ -166,6 +156,9 @@ def init(
 
     assert settings.user.uid  # check user is logged in
     owner = settings.user.handle
+
+    if settings._instance_exists:
+        close_instance()
 
     schema = validate_schema_arg(schema)
     validate_storage_root_arg(str(storage))

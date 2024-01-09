@@ -25,6 +25,7 @@ def close(mute: bool = False) -> None:
         current_instance_settings_file().unlink()
         delete_bionty_sources_yaml()
         clear_locker()
+        settings._instance_settings = None
         if not mute:
             logger.success(f"closed instance: {instance}")
     else:

@@ -3,8 +3,9 @@ import os
 import pytest
 from laminhub_rest.routers.collaborator import delete_collaborator
 from laminhub_rest.routers.instance import add_collaborator
-
+from lamindb_setup.dev._hub_core import load_instance as load_instance_from_hub
 import lamindb_setup as ln_setup
+from lamindb_setup._load_instance import get_owner_name_from_identifier
 from lamindb_setup.dev._hub_client import connect_hub_with_auth
 from lamindb_setup.dev._hub_crud import sb_update_instance
 
@@ -26,9 +27,7 @@ def test_load_remote_instance():
 def test_load_after_revoked_access():
     # can't currently test this on staging as I'm missing the accounts
     if os.getenv("LAMIN_ENV") == "prod":
-        ln_setup.login(
-            "static-testuser1@lamin.ai", password="static-testuser1-password"
-        )
+        ln_setup.login("static-testuser1@lamin.ai", key="static-testuser1-password")
         admin_token = ln_setup.settings.user.access_token
         add_collaborator(
             "static-testuser2",
@@ -37,9 +36,7 @@ def test_load_after_revoked_access():
             "write",
             f"Bearer {admin_token}",
         )
-        ln_setup.login(
-            "static-testuser2@lamin.ai", password="static-testuser2-password"
-        )
+        ln_setup.login("static-testuser2@lamin.ai", key="static-testuser2-password")
         ln_setup.load("https://lamin.ai/laminlabs/static-testinstance1", _test=True)
         assert ln_setup.settings.instance.storage.root_as_str == "s3://lndb-setup-ci"
         delete_collaborator(
@@ -49,7 +46,10 @@ def test_load_after_revoked_access():
             f"Bearer {admin_token}",
         )
         with pytest.raises(RuntimeError) as error:
-            ln_setup.load("https://lamin.ai/laminlabs/static-testinstance1", _test=True)
+            owner, name = get_owner_name_from_identifier(
+                "laminlabs/static-testinstance1"
+            )
+            load_instance_from_hub(owner=owner, name=name)
         assert (
             error.exconly()
             == "RuntimeError: Instance laminlabs/static-testinstance1 not"

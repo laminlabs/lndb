@@ -95,23 +95,17 @@ def load(
         storage: `Optional[PathLike] = None` - Load the instance with an
             updated default storage.
     """
-    from ._check_instance_setup import check_instance_setup
     from .dev._hub_core import load_instance as load_instance_from_hub
 
     owner, name = get_owner_name_from_identifier(identifier)
 
-    if check_instance_setup() and not _test:
-        raise RuntimeError(
-            "Currently don't support init or load of multiple instances in the same"
-            " Python session. We will bring this feature back at some point."
-        )
-    else:
-        # compare normalized identifier with a potentially previously loaded identifier
-        if (
-            settings._instance_exists
-            and f"{owner}/{name}" != settings.instance.identifier
-        ):
-            close_instance(mute=True)
+    # compare normalized identifier with a potentially previously loaded identifier
+    if settings._instance_exists:
+        if f"{owner}/{name}" == settings.instance.identifier:
+            logger.important(f"instance already loaded: {settings.instance.identifier}")
+            return None
+        else:
+            close_instance()
 
     settings_file = instance_settings_file(name, owner)
 
