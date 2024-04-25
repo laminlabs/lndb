@@ -6,9 +6,10 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 import botocore.session
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Literal, Dict
 import fsspec
+from fsspec.asyn import AsyncFileSystem, sync
 from itertools import islice
 from typing import Optional, Set, Any, Tuple, List
 from collections import defaultdict
@@ -18,6 +19,7 @@ from upath.implementations.cloud import CloudPath, S3Path  # noqa  # keep CloudP
 from upath.implementations.local import LocalPath, PosixUPath, WindowsUPath
 from .types import UPathStr
 from .hashing import b16_to_b64, hash_md5s_from_dir
+from ._synchronize import synchronize_sync, synchronize_async
 
 LocalPathClasses = (PosixUPath, WindowsUPath, LocalPath)
 
@@ -235,96 +237,12 @@ def upload_from(
 
 def synchronize(self, objectpath: Path, error_no_origin: bool = True, **kwargs):
     """Sync to a local destination path."""
-    # optimize the number of network requests
-    if "timestamp" in kwargs:
-        is_dir = False
-        exists = True
-        cloud_mts = kwargs.pop("timestamp")
+    if isinstance(self.fs, AsyncFileSystem):
+        sync(
+            self.fs.loop, synchronize_async, self, objectpath, error_no_origin, **kwargs
+        )
     else:
-        # perform only one network request to check existence, type and timestamp
-        try:
-            cloud_mts = self.modified.timestamp()
-            is_dir = False
-            exists = True
-        except FileNotFoundError:
-            exists = False
-        except IsADirectoryError:
-            is_dir = True
-            exists = True
-
-    if not exists:
-        warn_or_error = f"The original path {self} does not exist anymore."
-        if objectpath.exists():
-            warn_or_error += (
-                f"\nHowever, the local path {objectpath} still exists, you might want"
-                " to reupload the object back."
-            )
-            logger.warning(warn_or_error)
-        elif error_no_origin:
-            warn_or_error += "\nIt is not possible to synchronize."
-            raise FileNotFoundError(warn_or_error)
-        return None
-
-    # synchronization logic for directories
-    if is_dir:
-        files = self.fs.find(str(self), detail=True)
-        protocol_modified = {"s3": "LastModified", "gs": "mtime"}
-        modified_key = protocol_modified.get(self.protocol, None)
-        if modified_key is None:
-            raise ValueError(f"Can't synchronize a directory for {self.protocol}.")
-        if objectpath.exists():
-            destination_exists = True
-            cloud_mts_max = max(
-                file[modified_key] for file in files.values()
-            ).timestamp()
-            local_mts = [
-                file.stat().st_mtime for file in objectpath.rglob("*") if file.is_file()
-            ]
-            n_local_files = len(local_mts)
-            local_mts_max = max(local_mts)
-            if local_mts_max == cloud_mts_max:
-                need_synchronize = n_local_files != len(files)
-            elif local_mts_max > cloud_mts_max:
-                need_synchronize = False
-            else:
-                need_synchronize = True
-        else:
-            destination_exists = False
-            need_synchronize = True
-        if need_synchronize:
-            origin_file_keys = []
-            for file, stat in files.items():
-                destination = PurePosixPath(file).relative_to(self.path)
-                origin_file_keys.append(destination.as_posix())
-                timestamp = stat[modified_key].timestamp()
-                origin = UPath(f"{self.protocol}://{file}", **self._kwargs)
-                origin.synchronize(
-                    objectpath / destination, timestamp=timestamp, **kwargs
-                )
-            if destination_exists:
-                local_files = [file for file in objectpath.rglob("*") if file.is_file()]
-                if len(local_files) > len(files):
-                    for file in local_files:
-                        if (
-                            file.relative_to(objectpath).as_posix()
-                            not in origin_file_keys
-                        ):
-                            file.unlink()
-                            parent = file.parent
-                            if next(parent.iterdir(), None) is None:
-                                parent.rmdir()
-        return None
-
-    # synchronization logic for files
-    if objectpath.exists():
-        local_mts = objectpath.stat().st_mtime  # type: ignore
-        need_synchronize = cloud_mts > local_mts
-    else:
-        objectpath.parent.mkdir(parents=True, exist_ok=True)
-        need_synchronize = True
-    if need_synchronize:
-        self.download_to(objectpath, **kwargs)
-        os.utime(objectpath, times=(cloud_mts, cloud_mts))
+        synchronize_sync(self, objectpath, error_no_origin, **kwargs)
 
 
 def modified(self) -> Optional[datetime]:
