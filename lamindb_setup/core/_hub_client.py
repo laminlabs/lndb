@@ -84,8 +84,7 @@ def connect_hub_with_auth(
                 settings.user.email, settings.user.password, settings.user.api_key
             )
         access_token = settings.user.access_token
-    hub.postgrest.auth(access_token)
-    hub.functions.set_auth(access_token)
+    hub.auth.set_auth(access_token=access_token)
     return hub
 
 
