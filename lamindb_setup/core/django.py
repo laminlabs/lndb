@@ -94,6 +94,27 @@ def setup_django(
                 ],
                 STATIC_URL="static/",
             )
+        if True:
+            kwargs.update(
+                {
+                    "DEBUG": True,
+                    "LOGGING": {
+                        "version": 1,
+                        "handlers": {
+                            "console": {
+                                "level": "DEBUG",
+                                "class": "logging.StreamHandler",
+                            }
+                        },
+                        "loggers": {
+                            "django.db.backends": {
+                                "level": "DEBUG",
+                                "handlers": ["console"],
+                            }
+                        },
+                    },
+                }
+            )
         settings.configure(**kwargs)
         django.setup(set_prefix=False)
         # https://laminlabs.slack.com/archives/C04FPE8V01W/p1698239551460289
