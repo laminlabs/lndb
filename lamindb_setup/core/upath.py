@@ -256,15 +256,33 @@ class ChildProgressCallback(fsspec.callbacks.Callback):
 
 def download_to(self, local_path: UPathStr, print_progress: bool = True, **kwargs):
     """Download from self (a destination in the cloud) to the local path."""
-    if "recursive" not in kwargs:
+    is_file = kwargs.pop("is_file", None)
+    if is_file is None:
+        is_file = self.is_file()
+
+    if is_file:
+        kwargs.pop("recursive", None)
+    elif "recursive" not in kwargs:
         kwargs["recursive"] = True
+
     if print_progress and "callback" not in kwargs:
-        callback = ProgressCallback(
-            PurePosixPath(local_path).name, "downloading", adjust_size=True
-        )
+        objectname = PurePosixPath(local_path).name
+        action: Literal["uploading", "downloading", "synchronizing"] = "downloading"
+        if is_file:
+            show_progress = partial(print_hook, objectname=objectname, action=action)
+            callback = fsspec.callbacks.Callback(hooks={"show_progress": show_progress})
+        else:
+            callback = ProgressCallback(objectname, action, adjust_size=True)
         kwargs["callback"] = callback
 
-    self.fs.download(str(self), str(local_path), **kwargs)
+    rpath = str(self)
+    lpath = str(local_path)
+    # fs.download requires ListObjectsV2 on s3
+    # using fs.get_file allows to circumvent this requirement
+    if is_file:
+        self.fs.get_file(rpath, lpath, **kwargs)
+    else:
+        self.fs.download(rpath, lpath, **kwargs)
 
 
 def upload_from(
@@ -446,9 +464,15 @@ def synchronize(
         return None
 
     # synchronization logic for files
-    callback = ProgressCallback.requires_progress(
-        callback, print_progress, objectpath.name, "synchronizing"
-    )
+    if callback is None:
+        if print_progress:
+            show_progress = partial(
+                print_hook, objectname=objectpath.name, action="synchronizing"
+            )
+            callback = fsspec.callbacks.Callback(hooks={"show_progress": show_progress})
+        else:
+            callback = fsspec.callbacks.NoOpCallback()
+
     if objectpath.exists():
         if cloud_mts != 0:
             local_mts_obj = objectpath.stat().st_mtime
@@ -469,7 +493,7 @@ def synchronize(
         # returns the default callback
         # this is why a difference between s3 and hf in progress bars
         self.download_to(
-            objectpath, recursive=False, print_progress=False, callback=callback
+            objectpath, print_progress=False, is_file=True, callback=callback
         )
         if cloud_mts != 0:
             os.utime(objectpath, times=(cloud_mts, cloud_mts))
