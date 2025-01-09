@@ -200,6 +200,21 @@ def select_db_user_by_instance(instance_id: str, client: Client):
     return data[0]
 
 
+def select_write_db_user_by_instance(instance_id: str, client: Client):
+    """Get db_user for which client has permission."""
+    data = (
+        client.table("db_user")
+        .select("*")
+        .eq("instance_id", instance_id)
+        .eq("name", "write")
+        .execute()
+        .data
+    )
+    if len(data) == 0:
+        return None
+    return data[0]
+
+
 def _delete_instance_record(instance_id: UUID, client: Client) -> None:
     if not isinstance(instance_id, UUID):
         instance_id = UUID(instance_id)

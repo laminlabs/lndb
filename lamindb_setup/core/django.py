@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 import time
 from ._settings_instance import InstanceSettings
+from ._hub_crud import select_write_db_user_by_instance
+from ._hub_client import call_with_fallback_auth
+from ._hub_utils import LaminDsnModel
+
 
 
 IS_RUN_FROM_IPYTHON = getattr(builtins, "__IPYTHON__", False)
@@ -39,6 +43,7 @@ def setup_django(
     from django.core.management import call_command
 
     # configuration
+
     if not settings.configured:
         default_db = dj_database_url.config(
             env="LAMINDB_DJANGO_DATABASE_URL",
@@ -108,6 +113,7 @@ def setup_django(
         return None
 
     if deploy_migrations:
+        check_db_user(isettings)
         call_command("migrate", verbosity=2)
         isettings._update_cloud_sqlite_file(unlock_cloud_sqlite=False)
     elif init:
@@ -121,3 +127,29 @@ def setup_django(
 
     if isettings.keep_artifacts_local:
         isettings._search_local_root()
+
+
+def check_db_user(isettings: InstanceSettings):
+    """
+    Verify if the current database user has the necessary permissions to perform migrations.
+
+    This function checks if the current database user matches the authorized write user for the given instance.
+    If there's a mismatch or the write user information is not found, it raises a SystemExit with a detailed error message.
+
+    Args:
+        isettings (InstanceSettings): The instance settings containing database configuration.
+
+    Raises:
+        SystemExit: If the current user doesn't have the required permissions or if there's a configuration mismatch.
+    """
+    write_db_user = call_with_fallback_auth(
+        select_write_db_user_by_instance, instance_id=isettings._id
+    )
+    current_db_user = LaminDsnModel(db=isettings.db).db
+
+    if not write_db_user or current_db_user.user != write_db_user["db_user_name"]:
+        raise SystemExit(
+            "❌ The current db user is not authorized to perform migration. Please ensure the following:\n"
+            f"1. You have admin permissions for this instance.\n"
+            f"2. The database URL in your local settings is correct, it should ends with '_root'.\n"
+        )
